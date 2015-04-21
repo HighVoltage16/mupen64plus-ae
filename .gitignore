@@ -5,7 +5,6 @@ obj/
 tmp/
 *~
 *~.nib
-*.a
 *.ap_
 *.apk
 *.bak

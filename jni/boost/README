@@ -1,0 +1,8 @@
+Boost 1.53.0
+Built with NDK r10d using GCC 4.6 toolchain
+
+Source:
+https://github.com/sorccu/Boost-for-Android
+
+Usage:
+https://github.com/sorccu/Boost-for-Android/blob/multiabi-refactor/README.md
