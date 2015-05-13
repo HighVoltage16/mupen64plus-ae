@@ -44,9 +44,11 @@ public class GameSurface extends SurfaceView
     
     private static final String EGL_INITIALIZE_FAIL = "Failed to initialize EGL display connection";
     private static final String EGL_INITIALIZE = "Initialized EGL display connection";
+    private static final String EGL_INITIALIZE_NOCHANGE = "Re-used EGL display connection";
     
     private static final String EGL_CHOOSE_CONFIG_FAIL = "Failed to find compatible EGL frame buffer configuration";
     private static final String EGL_CHOOSE_CONFIG = "Found compatible EGL frame buffer configuration";
+    private static final String EGL_CHOOSE_CONFIG_NOCHANGE = "Re-used EGL frame buffer configuration";
     
     private static final String EGL_CREATE_CONTEXT_FAIL = "Failed to create EGL rendering context";
     private static final String EGL_CREATE_CONTEXT = "Created EGL rendering context";
@@ -221,6 +223,26 @@ public class GameSurface extends SurfaceView
     }
     
     /**
+     * Unbind the previously-created OpenGL ES rendering context and destroy the window surface.
+     * 
+     * @return True, if successful.
+     * @see GameSurface#destroyGLSurface()
+     */
+    public boolean destroyGLSurface()
+    {
+        Log.i( TAG, "Destroying GL surface" );
+        if( unbindEGLContext() )
+        {
+            if( destroyEGLSurface() )
+            {
+                return true;
+            }
+        }
+        Log.e( TAG, "Failed to destroy GL surface" );
+        return false;
+    }
+    
+    /**
      * Swap the OpenGL ES framebuffers. Requires valid, bound rendering context and window surface.
      * 
      * @see GameSurface#createGLContext(int, int, int[])
@@ -229,7 +251,8 @@ public class GameSurface extends SurfaceView
     {
         // Uncomment the next line only for debugging; otherwise don't waste the time
         // assertPrecondition( Precondition.surface );
-        mEgl.eglSwapBuffers( mEglDisplay, mEglSurface );
+        if( mEglSurface != null && mEglSurface != EGL10.EGL_NO_SURFACE )
+            mEgl.eglSwapBuffers( mEglDisplay, mEglSurface );
     }
     
     /**
@@ -247,59 +270,69 @@ public class GameSurface extends SurfaceView
         mEgl = (EGL10) EGLContext.getEGL();
         
         // Get an EGL display connection for the native display
-        mEglDisplay = mEgl.eglGetDisplay( EGL10.EGL_DEFAULT_DISPLAY );
-        if( mEglDisplay == EGL10.EGL_NO_DISPLAY )
+        if ( mEglDisplay == null || mEglDisplay == EGL10.EGL_NO_DISPLAY )
         {
-            Log.e( TAG, EGL_GET_DISPLAY_FAIL );
-            return false;
-        }
-        Log.v( TAG, EGL_GET_DISPLAY );
+            mEglDisplay = mEgl.eglGetDisplay( EGL10.EGL_DEFAULT_DISPLAY );
+            if( mEglDisplay == EGL10.EGL_NO_DISPLAY )
+            {
+                Log.e( TAG, EGL_GET_DISPLAY_FAIL );
+                return false;
+            }
+            Log.v( TAG, EGL_GET_DISPLAY );
         
-        // Initialize the EGL display connection and obtain the GLES version supported by the device
-        final int[] version = new int[2];
-        if( !mEgl.eglInitialize( mEglDisplay, version ) )
-        {
-            Log.e( TAG, EGL_INITIALIZE_FAIL );
-            return false;
+            // Initialize the EGL display connection and obtain the GLES version supported by the device
+            int[] version = new int[2];
+            if( !mEgl.eglInitialize( mEglDisplay, version ) )
+            {
+                Log.e( TAG, EGL_INITIALIZE_FAIL );
+                return false;
+            }
+            Log.v( TAG, EGL_INITIALIZE );
         }
-        Log.v( TAG, EGL_INITIALIZE );
+        else
+            Log.v( TAG, EGL_INITIALIZE_NOCHANGE );
         
         // Set the EGL frame buffer configuration and ensure that it supports the requested GLES
         // version, display connection, and frame buffer configuration
         // (http://stackoverflow.com/a/5930935/254218)
         
-        // Get the number of compatible EGL frame buffer configurations
-        final int[] numConfigOut = new int[1];
-        mEgl.eglChooseConfig( mEglDisplay, configSpec, null, 0, numConfigOut );
-        final int numConfig = numConfigOut[0];
-        
-        // Get the compatible EGL frame buffer configurations
-        final EGLConfig[] configs = new EGLConfig[numConfig];
-        boolean success = mEgl.eglChooseConfig( mEglDisplay, configSpec, configs, numConfig, null );
-        if( !success || numConfig == 0 )
+        if (mEglContext == null || mEglContext == EGL10.EGL_NO_CONTEXT)
         {
-            Log.e( TAG, EGL_CHOOSE_CONFIG_FAIL );
-            return false;
-        }
-        
-        // Select the best configuration
-        for( int i = 0; i < numConfig; i++ )
-        {
-            // "Best" config is the first one that is fast and egl-conformant
-            // So we test for the "caveat" flag which would indicate slow/non-conformant
-            int[] value = new int[1];
-            mEgl.eglGetConfigAttrib( mEglDisplay, configs[i], EGL10.EGL_CONFIG_CAVEAT, value );
-            if( value[0] == EGL10.EGL_NONE )
+            // Get the number of compatible EGL frame buffer configurations
+            int[] numConfigOut = new int[1];
+            mEgl.eglChooseConfig( mEglDisplay, configSpec, null, 0, numConfigOut );
+            int numConfig = numConfigOut[0];
+            
+            // Get the compatible EGL frame buffer configurations
+            EGLConfig[] configs = new EGLConfig[numConfig];
+            boolean success = mEgl.eglChooseConfig( mEglDisplay, configSpec, configs, numConfig, null );
+            if( !success || numConfig == 0 )
             {
-                mEglConfig = configs[i];
-                break;
+                Log.e( TAG, EGL_CHOOSE_CONFIG_FAIL );
+                return false;
             }
+            
+            // Select the best configuration
+            for( int i = 0; i < numConfig; i++ )
+            {
+                // "Best" config is the first one that is fast and egl-conformant
+                // So we test for the "caveat" flag which would indicate slow/non-conformant
+                int[] value = new int[1];
+                mEgl.eglGetConfigAttrib( mEglDisplay, configs[i], EGL10.EGL_CONFIG_CAVEAT, value );
+                if( value[0] == EGL10.EGL_NONE )
+                {
+                    mEglConfig = configs[i];
+                    break;
+                }
+            }
+            Log.v( TAG, EGL_CHOOSE_CONFIG );
         }
+        else
+            Log.v( TAG, EGL_CHOOSE_CONFIG_NOCHANGE );
         
         // Record the major version
         mGlMajorVersion = majorVersion;
         
-        Log.v( TAG, EGL_CHOOSE_CONFIG );
         return true;
     }
     
@@ -313,13 +346,13 @@ public class GameSurface extends SurfaceView
      */
     private boolean createEGLContext( boolean forceCreate )
     {
-        assertPrecondition( Precondition.CONFIG );
+        // assertPrecondition( Precondition.CONFIG );
         
         // Create EGL rendering context
         if( forceCreate || mEglContext == null || mEglContext == EGL10.EGL_NO_CONTEXT )
         {
-            final int EGL_CONTEXT_CLIENT_VERSION = 0x3098;
-            final int[] contextAttrs = new int[] {
+            int EGL_CONTEXT_CLIENT_VERSION = 0x3098;
+            int[] contextAttrs = new int[] {
                 EGL_CONTEXT_CLIENT_VERSION,
                 mGlMajorVersion,
                 EGL10.EGL_NONE };
@@ -347,7 +380,7 @@ public class GameSurface extends SurfaceView
      */
     private boolean createEGLSurface( boolean forceCreate )
     {
-        assertPrecondition( Precondition.CONTEXT );
+        // assertPrecondition( Precondition.CONTEXT );
         
         // Create window surface
         if( forceCreate || mEglSurface == null || mEglSurface == EGL10.EGL_NO_SURFACE )
@@ -374,7 +407,7 @@ public class GameSurface extends SurfaceView
      */
     private boolean bindEGLContext()
     {
-        assertPrecondition( Precondition.SURFACE );
+        // assertPrecondition( Precondition.SURFACE );
         
         // Bind the EGL rendering context to the window surface and current rendering thread
         if( mEgl.eglGetCurrentContext() != mEglContext )
@@ -400,10 +433,10 @@ public class GameSurface extends SurfaceView
      */
     private boolean unbindEGLContext()
     {
-        assertPrecondition( Precondition.DISPLAY );
+        // assertPrecondition( Precondition.DISPLAY );
         
         // Unbind rendering context and window surface
-        if( mEglDisplay != null )
+        if( mEglDisplay != null && mEglDisplay != EGL10.EGL_NO_DISPLAY )
         {
             if( !mEgl.eglMakeCurrent( mEglDisplay, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE,
                     EGL10.EGL_NO_CONTEXT ) )
@@ -427,7 +460,7 @@ public class GameSurface extends SurfaceView
      */
     private boolean destroyEGLSurface()
     {
-        assertPrecondition( Precondition.DISPLAY );
+        // assertPrecondition( Precondition.DISPLAY );
         
         // Destroy window surface
         if( mEglSurface != null && mEglSurface != EGL10.EGL_NO_SURFACE )
@@ -454,7 +487,7 @@ public class GameSurface extends SurfaceView
      */
     private boolean destroyEGLContext()
     {
-        assertPrecondition( Precondition.DISPLAY );
+        // assertPrecondition( Precondition.DISPLAY );
         
         // Destroy rendering context
         if( mEglContext != null && mEglContext != EGL10.EGL_NO_CONTEXT )
@@ -482,7 +515,7 @@ public class GameSurface extends SurfaceView
      */
     private boolean terminateEGL()
     {
-        assertPrecondition( Precondition.EGL );
+        // assertPrecondition( Precondition.EGL );
         
         // Terminate display connection
         if( mEglDisplay != null && mEglDisplay != EGL10.EGL_NO_DISPLAY )

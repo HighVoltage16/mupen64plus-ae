@@ -280,8 +280,10 @@ public class GameLifecycleHandler implements View.OnKeyListener, SurfaceHolder.C
         Log.i( "GameLifecycleHandler", "onWindowFocusChanged: " + hasFocus );
         mIsFocused = hasFocus;
         if( hasFocus )
+        {
             hideSystemBars();
-        tryRunning();
+            tryRunning();
+        }
     }
     
     public void onPause()
@@ -298,7 +300,8 @@ public class GameLifecycleHandler implements View.OnKeyListener, SurfaceHolder.C
     {
         Log.i( "GameLifecycleHandler", "surfaceDestroyed" );
         mIsSurface = false;
-        tryStopping();
+        tryPausing();
+        mSurface.destroyGLSurface();
     }
     
     public void onStop()
